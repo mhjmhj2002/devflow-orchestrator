@@ -1,0 +1,7 @@
+# Exemplo de CODEOWNERS — ajuste conforme times reais
+
+/services/identity-service/ @team-identity
+/services/workflow-service/ @team-workflow
+/gateway/ @team-gateway
+/web/ @team-web
+

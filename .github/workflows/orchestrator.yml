@@ -1,0 +1,113 @@
+name: Orchestrator PR Validation
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'services/**'
+      - 'gateway/**'
+      - 'web/**'
+      - 'pom.xml'
+
+jobs:
+  root-pom-check:
+    name: Prevent accidental root pom.xml changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed files
+        id: changes
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }} || true
+          git diff --name-only origin/${{ github.event.pull_request.base.ref }}...${{ github.sha }} | tee changed_files.txt || true
+          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+          cat changed_files.txt
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Fail if root pom.xml changed and no approval label
+        run: |
+          if grep -xq "pom.xml" changed_files.txt; then
+            echo "Root pom.xml was changed in this PR. This repository policy requires a human review for root pom.xml changes." 
+            # Check for label 'allow-root-pom-change'
+            LABELS=$(jq -r '.pull_request.labels[].name' < $GITHUB_EVENT_PATH || true)
+            echo "labels=$LABELS"
+            if echo "$LABELS" | grep -q "allow-root-pom-change"; then
+              echo "Label allow-root-pom-change present — continuing."
+            else
+              echo "No allow-root-pom-change label found. Failing the job." 
+              exit 1
+            fi
+          else
+            echo "No root pom.xml change detected."
+          fi
+
+  build:
+    name: Build & Test (full)
+    needs: root-pom-check
+    if: startsWith(github.head_ref, 'orchestrator/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache local Maven repository
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-m2-
+
+      - name: Build & test
+        run: mvn -T1C -DskipTests=false clean install
+
+  module-tests:
+    name: Module-level tests for changed modules
+    needs: root-pom-check
+    if: startsWith(github.head_ref, 'orchestrator/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Identify changed modules
+        id: modules
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }} || true
+          git diff --name-only origin/${{ github.event.pull_request.base.ref }}...${{ github.sha }} | tee changed_files.txt || true
+          # Extrair módulos alterados (services/<mod>/..., gateway/<mod>/..., web/<mod>/...)
+          awk -F'/' '/^(services|gateway|web)\// { key=$1"/"$2; mods[key]=1 } END { for (m in mods) print m }' changed_files.txt | sort > changed_modules.txt || true
+          cat changed_modules.txt || true
+          echo "modules<<EOF" >> $GITHUB_OUTPUT
+          cat changed_modules.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Run module tests (if any)
+        run: |
+          if [[ -s changed_modules.txt ]]; then
+            MODULES=$(cat changed_modules.txt | tr '\n' ',')
+            echo "Running tests for modules: $MODULES"
+            # Remove trailing comma
+            MODULES=${MODULES%,}
+            # Execute mvn for each (mvn -am -pl path)
+            IFS=',' read -ra MS <<< "$MODULES"
+            for m in "${MS[@]}"; do
+              echo "Testing module: $m"
+              mvn -am -pl "$m" clean test
+            done
+          else
+            echo "No modules detected as changed; skipping module-level tests."
+          fi
+
