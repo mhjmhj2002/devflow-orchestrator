@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Lightweight wrapper named `uvicorn` to allow running `./uvicorn ...` inside the
+# project dir without activating the virtualenv. It will prefer the project's venv
+# Python (or active venv), falling back to system `uvicorn`/`python -m uvicorn`.
+#
+# Usage:
+#   ./uvicorn app.main:app --reload --port 8000
+#   ./uvicorn --help
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: ./uvicorn <uvicorn-args>"
+  exit 0
+fi
+
+REAL_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$REAL_PATH")" && pwd)"
+# If the script is symlinked into a bin dir, the real script location is inside
+# the project; use that as the project dir.
+PROJECT_DIR="$SCRIPT_DIR"
+
+# Prefer active venv, then common venv dirs in project
+PYTHON=python
+if [ -n "${VIRTUAL_ENV:-}" ]; then
+  PYTHON="$VIRTUAL_ENV/bin/python"
+else
+  for candidate in "$PROJECT_DIR/.venv/bin/python" "$PROJECT_DIR/venv/bin/python" "$PROJECT_DIR/env/bin/python"; do
+    if [ -x "$candidate" ]; then
+      PYTHON="$candidate"
+      break
+    fi
+  done
+fi
+
+cd "$PROJECT_DIR"
+
+# If python has uvicorn, use it; otherwise try uvicorn in PATH or python3/python
+if "$PYTHON" -c "import importlib; importlib.import_module('uvicorn')" 2>/dev/null; then
+  CMD=("$PYTHON" -m uvicorn "$@")
+else
+  # If uvicorn exists on PATH, ensure it's not this wrapper itself (avoid recursion)
+  if command -v uvicorn >/dev/null 2>&1; then
+    UVICORN_PATH="$(command -v uvicorn)"
+    # resolve real path of this wrapper and of the PATH uvicorn
+    REAL_OWN_PATH="$(readlink -f "$REAL_PATH")"
+    REAL_UVICORN_PATH="$(readlink -f "$UVICORN_PATH")" 2>/dev/null || REAL_UVICORN_PATH="$UVICORN_PATH"
+    if [ "$REAL_UVICORN_PATH" != "$REAL_OWN_PATH" ]; then
+      CMD=("uvicorn" "$@")
+    fi
+  fi
+  if [ -z "${CMD:+x}" ]; then
+    if command -v python3 >/dev/null 2>&1 && python3 -c "import importlib; importlib.import_module('uvicorn')" 2>/dev/null; then
+      CMD=("python3" -m uvicorn "$@")
+    elif python -c "import importlib; importlib.import_module('uvicorn')" 2>/dev/null; then
+      CMD=("python" -m uvicorn "$@")
+    else
+      echo "Error: uvicorn not found in project venv and not on PATH." >&2
+      echo "Install uvicorn in your virtualenv: (cd $PROJECT_DIR && python -m pip install 'uvicorn[standard]')" >&2
+      exit 1
+    fi
+  fi
+fi
+
+echo "Running: ${CMD[*]}"
+exec "${CMD[@]}"
+
