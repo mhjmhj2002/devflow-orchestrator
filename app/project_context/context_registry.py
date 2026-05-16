@@ -3,10 +3,7 @@
 from pathlib import Path
 
 PROJECTS = {
-    "agentic-ms-user": "/home/mhj/git/agentic-ms-user",
-    "agentic-ms-order": "/home/mhj/git/agentic-ms-order",
-    # Local mapping for this monorepo so codegen can operate on the workspace
-    "devflow-ai": "/home/mhj/git/devflow-ai"
+    "devflow-platform": "/home/mhj/git/devflow-platform"
 }
 
 

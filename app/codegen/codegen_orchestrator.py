@@ -73,6 +73,119 @@ def start_codegen_workflow(payload: Dict[str, Any]):
 
     gen_file.write_text(content)
 
+    # ==== NEW CODE TO GENERATE CRUD ====
+    if repository == "devflow-platform":
+        base_pkg = target / "services" / "identity-service" / "src" / "main" / "java" / "com" / "devflow" / "identity"
+        if base_pkg.exists():
+            logger.info("Generating User CRUD for identity-service")
+            
+            # User Entity
+            user_java = base_pkg / "User.java"
+            user_java.write_text(
+                "package com.devflow.identity;\n\n"
+                "public class User {\n"
+                "    private Long id;\n"
+                "    private String name;\n"
+                "    private String email;\n\n"
+                "    public Long getId() { return id; }\n"
+                "    public void setId(Long id) { this.id = id; }\n"
+                "    public String getName() { return name; }\n"
+                "    public void setName(String name) { this.name = name; }\n"
+                "    public String getEmail() { return email; }\n"
+                "    public void setEmail(String email) { this.email = email; }\n"
+                "}\n"
+            )
+            
+            # UserRepository
+            repo_java = base_pkg / "UserRepository.java"
+            repo_java.write_text(
+                "package com.devflow.identity;\n\n"
+                "import org.springframework.stereotype.Repository;\n"
+                "import java.util.*;\n"
+                "import java.util.concurrent.ConcurrentHashMap;\n"
+                "import java.util.concurrent.atomic.AtomicLong;\n\n"
+                "@Repository\n"
+                "public class UserRepository {\n"
+                "    private final Map<Long, User> db = new ConcurrentHashMap<>();\n"
+                "    private final AtomicLong seq = new AtomicLong(1);\n\n"
+                "    public Optional<User> findById(Long id) {\n"
+                "        return Optional.ofNullable(db.get(id));\n"
+                "    }\n"
+                "    public List<User> findAll() {\n"
+                "        return new ArrayList<>(db.values());\n"
+                "    }\n"
+                "    public User save(User user) {\n"
+                "        if (user.getId() == null) {\n"
+                "            user.setId(seq.getAndIncrement());\n"
+                "        }\n"
+                "        db.put(user.getId(), user);\n"
+                "        return user;\n"
+                "    }\n"
+                "    public void deleteById(Long id) {\n"
+                "        db.remove(id);\n"
+                "    }\n"
+                "}\n"
+            )
+            
+            # UserService
+            service_java = base_pkg / "UserService.java"
+            service_java.write_text(
+                "package com.devflow.identity;\n\n"
+                "import org.springframework.stereotype.Service;\n"
+                "import java.util.List;\n\n"
+                "@Service\n"
+                "public class UserService {\n"
+                "    private final UserRepository userRepository;\n\n"
+                "    public UserService(UserRepository userRepository) {\n"
+                "        this.userRepository = userRepository;\n"
+                "    }\n\n"
+                "    public List<User> getAllUsers() {\n"
+                "        return userRepository.findAll();\n"
+                "    }\n\n"
+                "    public User getUser(Long id) {\n"
+                "        return userRepository.findById(id).orElse(null);\n"
+                "    }\n\n"
+                "    public User createUser(User user) {\n"
+                "        return userRepository.save(user);\n"
+                "    }\n\n"
+                "    public void deleteUser(Long id) {\n"
+                "        userRepository.deleteById(id);\n"
+                "    }\n"
+                "}\n"
+            )
+            
+            # UserController
+            ctrl_java = base_pkg / "UserController.java"
+            ctrl_java.write_text(
+                "package com.devflow.identity;\n\n"
+                "import org.springframework.web.bind.annotation.*;\n"
+                "import java.util.List;\n\n"
+                "@RestController\n"
+                "@RequestMapping(\"/users\")\n"
+                "public class UserController {\n"
+                "    private final UserService userService;\n\n"
+                "    public UserController(UserService userService) {\n"
+                "        this.userService = userService;\n"
+                "    }\n\n"
+                "    @GetMapping\n"
+                "    public List<User> getAll() {\n"
+                "        return userService.getAllUsers();\n"
+                "    }\n\n"
+                "    @GetMapping(\"/{id}\")\n"
+                "    public User get(@PathVariable Long id) {\n"
+                "        return userService.getUser(id);\n"
+                "    }\n\n"
+                "    @PostMapping\n"
+                "    public User create(@RequestBody User user) {\n"
+                "        return userService.createUser(user);\n"
+                "    }\n\n"
+                "    @DeleteMapping(\"/{id}\")\n"
+                "    public void delete(@PathVariable Long id) {\n"
+                "        userService.deleteUser(id);\n"
+                "    }\n"
+                "}\n"
+            )
+
     # environment flags
     DRY_RUN = os.getenv("DEVFLOW_DRY_RUN", "false").lower() in ("1", "true", "yes")
 
